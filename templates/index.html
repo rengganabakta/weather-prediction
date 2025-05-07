@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="refresh" content="5" />
+    <title>ESP32 Weather Dashboard</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+    />
+    <style>
+      body {
+        background-color: #f8f9fa;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      }
+      .dashboard-container {
+        max-width: 1200px;
+        margin: 2rem auto;
+        padding: 0 1rem;
+      }
+      .header {
+        background: linear-gradient(135deg, #4b6cb7 0%, #182848 100%);
+        color: white;
+        padding: 2rem;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+      .stats-card {
+        background: white;
+        border-radius: 10px;
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+      }
+      .table-container {
+        background: white;
+        border-radius: 10px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+      }
+      .table {
+        margin-bottom: 0;
+      }
+      .table th {
+        background-color: #f8f9fa;
+        font-weight: 600;
+      }
+      .prediction-rain {
+        color: #dc3545;
+      }
+      .prediction-no-rain {
+        color: #28a745;
+      }
+      .refresh-info {
+        font-size: 0.9rem;
+        color: #6c757d;
+        margin-top: 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="dashboard-container">
+      <div class="header text-center">
+        <h1><i class="fas fa-cloud-sun"></i> ESP32 Weather Dashboard</h1>
+        <p class="mb-0">Real-time weather monitoring system</p>
+      </div>
+
+      <div class="row">
+        <div class="col-md-4">
+          <div class="stats-card">
+            <h5><i class="fas fa-database"></i> Total Entries</h5>
+            <h2>{{ data_history | length }}</h2>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="stats-card">
+            <h5><i class="fas fa-clock"></i> Last Update</h5>
+            <h2>
+              {{ data_history[0].timestamp if data_history else 'No Data' }}
+            </h2>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="stats-card">
+            <h5><i class="fas fa-cloud-rain"></i> Latest Prediction</h5>
+            <h2
+              class="{{ 'prediction-rain' if data_history and data_history[0].prediction == 1 else 'prediction-no-rain' }}"
+            >
+              {{ data_history[0].prediction_label if data_history else 'No Data'
+              }}
+            </h2>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-container mt-4">
+        <h4 class="mb-3">Historical Data</h4>
+        <div class="table-responsive">
+          <table class="table table-hover">
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Temperature (°C)</th>
+                <th>Humidity (%)</th>
+                <th>Pressure (hPa)</th>
+                <th>Prediction</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for entry in data_history %}
+              <tr>
+                <td>{{ entry.timestamp }}</td>
+                <td>{{ entry.value1 }}</td>
+                <td>{{ entry.value2 }}</td>
+                <td>{{ entry.value3 }}</td>
+                <td
+                  class="{{ 'prediction-rain' if entry.prediction == 1 else 'prediction-no-rain' }}"
+                >
+                  {{ entry.prediction_label }}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="refresh-info text-center">
+        <i class="fas fa-sync-alt"></i> Auto-refreshing every 5 seconds
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  </body>
+</html>
