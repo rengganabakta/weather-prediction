@@ -54,90 +54,74 @@ except Exception as e:
     collection = None
 
 # MQTT Client setup
-try:
-    mqtt_client = mqtt.Client()
-    mqtt_connected = False
-    last_mqtt_connect_attempt = 0
+mqtt_client = None
+mqtt_connected = False
 
-    @mqtt_client.on_connect
-    def on_connect(client, userdata, flags, rc):
-        global mqtt_connected
-        if rc == 0:
-            logger.info("Connected to MQTT broker")
-            mqtt_connected = True
-            client.subscribe(MQTT_TOPIC)
-        else:
-            logger.error(f"Failed to connect to MQTT broker with code: {rc}")
+def setup_mqtt():
+    global mqtt_client, mqtt_connected
+    try:
+        mqtt_client = mqtt.Client()
+        
+        @mqtt_client.on_connect
+        def on_connect(client, userdata, flags, rc):
+            global mqtt_connected
+            if rc == 0:
+                logger.info("Connected to MQTT broker")
+                mqtt_connected = True
+                client.subscribe(MQTT_TOPIC)
+            else:
+                logger.error(f"Failed to connect to MQTT broker with code: {rc}")
+                mqtt_connected = False
+
+        @mqtt_client.on_disconnect
+        def on_disconnect(client, userdata, rc):
+            global mqtt_connected
+            logger.warning(f"Disconnected from MQTT broker with code: {rc}")
             mqtt_connected = False
 
-    @mqtt_client.on_disconnect
-    def on_disconnect(client, userdata, rc):
-        global mqtt_connected
-        logger.warning(f"Disconnected from MQTT broker with code: {rc}")
-        mqtt_connected = False
-
-    @mqtt_client.on_message
-    def on_message(client, userdata, msg):
-        try:
-            payload = json.loads(msg.payload.decode())
-            logger.info(f"Received MQTT message: {payload}")
-            
-            # Process sensor data
-            temp = float(payload.get('value1', 0))
-            humid = float(payload.get('value2', 0))
-            press = float(payload.get('value3', 0))
-            
-            # Make prediction
-            prediction_int, prediction_label = make_prediction(temp, humid, press)
-            servo_position = get_servo_position(prediction_int)
-            
-            # Save to database
-            entry = {
-                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                "value1": round(temp, 2),
-                "value2": round(humid, 2),
-                "value3": round(press, 2),
-                "prediction": prediction_int,
-                "prediction_label": prediction_label,
-                "servo_position": servo_position
-            }
-            
-            if collection is not None:
-                collection.insert_one(entry)
-            
-            # Emit to websocket
-            socketio.emit('sensor_update', entry)
-            
-        except Exception as e:
-            logger.error(f"Error processing MQTT message: {str(e)}")
-
-    def ensure_mqtt_connection():
-        global mqtt_connected, last_mqtt_connect_attempt
-        current_time = time.time()
-        
-        if not mqtt_connected and (current_time - last_mqtt_connect_attempt) >= MQTT_RECONNECT_DELAY:
+        @mqtt_client.on_message
+        def on_message(client, userdata, msg):
             try:
-                logger.info("Attempting to reconnect to MQTT broker...")
-                mqtt_client.reconnect()
-                last_mqtt_connect_attempt = current_time
+                payload = json.loads(msg.payload.decode())
+                logger.info(f"Received MQTT message: {payload}")
+                
+                # Process sensor data
+                temp = float(payload.get('value1', 0))
+                humid = float(payload.get('value2', 0))
+                press = float(payload.get('value3', 0))
+                
+                # Make prediction
+                prediction_int, prediction_label = make_prediction(temp, humid, press)
+                servo_position = get_servo_position(prediction_int)
+                
+                # Save to database
+                entry = {
+                    "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    "value1": round(temp, 2),
+                    "value2": round(humid, 2),
+                    "value3": round(press, 2),
+                    "prediction": prediction_int,
+                    "prediction_label": prediction_label,
+                    "servo_position": servo_position
+                }
+                
+                if collection is not None:
+                    collection.insert_one(entry)
+                
+                # Emit to websocket
+                socketio.emit('sensor_update', entry)
+                
             except Exception as e:
-                logger.error(f"Error reconnecting to MQTT broker: {str(e)}")
+                logger.error(f"Error processing MQTT message: {str(e)}")
 
-    # Start MQTT client in a separate thread
-    def start_mqtt():
-        try:
-            mqtt_client.connect(MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE)
-            mqtt_client.loop_start()
-            logger.info("MQTT client started")
-        except Exception as e:
-            logger.error(f"Error starting MQTT client: {str(e)}")
-
-    # Start MQTT client
-    start_mqtt()
-
-except Exception as e:
-    logger.error(f"Error setting up MQTT client: {str(e)}")
-    mqtt_client = None
+        # Start MQTT client
+        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE)
+        mqtt_client.loop_start()
+        logger.info("MQTT client started")
+        
+    except Exception as e:
+        logger.error(f"Error setting up MQTT client: {str(e)}")
+        mqtt_client = None
 
 # Load the trained AI model
 try:
@@ -226,15 +210,7 @@ def make_prediction(temp: float, humid: float, press: float) -> tuple[int, str]:
 
 @app.route('/data', methods=['POST'])
 def receive_data():
-    """
-    Endpoint untuk menerima data JSON dari ESP32.
-    JSON:
-    {
-        "value1": <float> (Temperature),
-        "value2": <float> (Humidity),
-        "value3": <float> (Pressure)
-    }
-    """
+    """Endpoint untuk menerima data JSON dari ESP32"""
     logger.info("Received POST request to /data endpoint")
     try:
         # Log raw request data
@@ -318,9 +294,6 @@ def toggle_servo():
         new_position = 0 if last_servo_position == 90 else 90
         last_servo_position = new_position
         
-        # Ensure MQTT connection before publishing
-        ensure_mqtt_connection()
-        
         # Publish to MQTT
         if mqtt_client and mqtt_connected:
             control_message = json.dumps({"servo_position": new_position})
@@ -350,19 +323,28 @@ def toggle_servo():
 @app.route('/')
 def index():
     """Dashboard halaman utama"""
-    # Get last 100 records from MongoDB
-    if collection is not None:
-        data_history = list(collection.find().sort('timestamp', -1).limit(100))
-        # Convert ObjectId to string for JSON serialization
-        for item in data_history:
-            item['_id'] = str(item['_id'])
-    else:
-        data_history = []
-    
-    return render_template('index.html', 
-                         data_history=data_history,
-                         current_servo_position=last_servo_position)
+    try:
+        # Get last 100 records from MongoDB
+        if collection is not None:
+            data_history = list(collection.find().sort('timestamp', -1).limit(100))
+            # Convert ObjectId to string for JSON serialization
+            for item in data_history:
+                item['_id'] = str(item['_id'])
+        else:
+            data_history = []
+        
+        return render_template('index.html', 
+                             data_history=data_history,
+                             current_servo_position=last_servo_position)
+    except Exception as e:
+        logger.error(f"Error rendering index: {str(e)}")
+        return render_template('index.html', 
+                             data_history=[],
+                             current_servo_position=0)
 
 if __name__ == '__main__':
+    # Setup MQTT
+    setup_mqtt()
+    
     # Run Flask app with SocketIO
     socketio.run(app, host='0.0.0.0', port=5000, debug=True)
