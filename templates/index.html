@@ -331,13 +331,16 @@
       <!-- Servo Control Section -->
       <div class="servo-control">
         <h3>Servo Control</h3>
-        <button
-          id="toggleServo"
-          class="btn btn-primary servo-button {% if current_servo_position == 90 %}active{% else %}inactive{% endif %}"
-        >
-          Toggle Servo (Current:
-          <span id="currentServoPosition">{{ current_servo_position }}°</span>)
-        </button>
+        <div class="d-flex justify-content-center gap-3">
+          <button id="toggleServo" class="btn btn-primary servo-button">
+            Toggle Servo (Current:
+            <span id="currentServoPosition">{{ current_servo_position }}°</span
+            >)
+          </button>
+          <button id="manualControl" class="btn btn-warning servo-button">
+            Manual Control
+          </button>
+        </div>
         <div class="servo-status" id="servoStatus"></div>
       </div>
 
@@ -409,7 +412,56 @@
       // Connect to WebSocket
       const socket = io();
 
-      // Handle real-time updates
+      // Handle manual control button
+      document
+        .getElementById("manualControl")
+        .addEventListener("click", function () {
+          const button = this;
+          const statusDiv = document.getElementById("servoStatus");
+
+          // Disable button and show loading state
+          button.disabled = true;
+          statusDiv.textContent = "Updating servo position...";
+
+          // Get current position
+          const currentPos = parseInt(
+            document.getElementById("currentServoPosition").textContent
+          );
+          // Toggle position
+          const newPos = currentPos === 0 ? 90 : 0;
+
+          fetch("/toggle_servo", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          })
+            .then((response) => response.json())
+            .then((data) => {
+              if (data.status === "success") {
+                document.getElementById("currentServoPosition").textContent =
+                  data.servo_position + "°";
+                statusDiv.textContent = `Servo moved to ${data.servo_position}°`;
+                statusDiv.style.color = "#28a745";
+              } else {
+                throw new Error(
+                  data.error || "Failed to update servo position"
+                );
+              }
+            })
+            .catch((error) => {
+              statusDiv.textContent = "Error: " + error.message;
+              statusDiv.style.color = "#dc3545";
+            })
+            .finally(() => {
+              // Re-enable button after 1 second
+              setTimeout(() => {
+                button.disabled = false;
+              }, 1000);
+            });
+        });
+
+      // Handle automatic control based on prediction
       socket.on("sensor_update", function (data) {
         // Update stats
         document.getElementById("lastUpdate").textContent = data.timestamp;
@@ -417,6 +469,13 @@
           data.prediction_label;
         document.getElementById("latestPrediction").className =
           "stat-value prediction-" + data.prediction_label.toLowerCase();
+
+        // Update servo position based on prediction
+        if (data.prediction === 1) {
+          document.getElementById("currentServoPosition").textContent = "90°";
+        } else {
+          document.getElementById("currentServoPosition").textContent = "0°";
+        }
 
         // Update table
         const tbody = document.getElementById("dataTableBody");
@@ -432,63 +491,15 @@
           <td>${data.servo_position}°</td>
         `;
 
-        // Add new row at the top
         tbody.insertBefore(newRow, tbody.firstChild);
 
-        // Remove last row if more than 100 entries
         if (tbody.children.length > 100) {
           tbody.removeChild(tbody.lastChild);
         }
 
-        // Update total entries
         document.getElementById("totalEntries").textContent =
           tbody.children.length;
       });
-
-      function toggleServo() {
-        const button = document.getElementById("toggleServo");
-        button.disabled = true;
-
-        fetch("/toggle_servo", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        })
-          .then((response) => response.json())
-          .then((data) => {
-            if (data.status === "success") {
-              // Update button appearance
-              if (data.servo_position === 90) {
-                button.classList.remove("inactive");
-                button.classList.add("active");
-                button.textContent = "0°";
-              } else {
-                button.classList.remove("active");
-                button.classList.add("inactive");
-                button.textContent = "90°";
-              }
-              document.getElementById("currentServoPosition").textContent =
-                data.servo_position + "°";
-              document.getElementById(
-                "servoStatus"
-              ).textContent = `Servo moved to ${data.servo_position}°`;
-              document.getElementById("servoStatus").style.color = "#28a745";
-            }
-            button.disabled = false;
-          })
-          .catch((error) => {
-            console.error("Error:", error);
-            button.disabled = false;
-            document.getElementById("servoStatus").textContent =
-              "Error: " + error.message;
-            document.getElementById("servoStatus").style.color = "#dc3545";
-          });
-      }
-
-      document
-        .getElementById("toggleServo")
-        .addEventListener("click", toggleServo);
     </script>
   </body>
 </html>
