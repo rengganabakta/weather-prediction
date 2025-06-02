@@ -284,6 +284,37 @@
       .data-table {
         margin-top: 30px;
       }
+
+      .card {
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+      .card-header {
+        background-color: #f8f9fa;
+        font-weight: bold;
+      }
+      .servo-control {
+        text-align: center;
+        padding: 20px;
+        background-color: #f8f9fa;
+        border-radius: 8px;
+        margin-bottom: 20px;
+      }
+      .servo-button {
+        padding: 15px 30px;
+        font-size: 1.2em;
+        font-weight: bold;
+        border-radius: 8px;
+        transition: all 0.3s ease;
+      }
+      .servo-button:hover {
+        transform: scale(1.05);
+      }
+      .servo-status {
+        margin-top: 10px;
+        font-size: 1.1em;
+        color: #666;
+      }
     </style>
   </head>
   <body>
@@ -295,6 +326,19 @@
         <p class="text-center text-light mb-0">
           Real-time weather monitoring system
         </p>
+      </div>
+
+      <!-- Servo Control Section -->
+      <div class="servo-control">
+        <h3>Servo Control</h3>
+        <button
+          id="toggleServo"
+          class="btn btn-primary servo-button {% if current_servo_position == 90 %}active{% else %}inactive{% endif %}"
+        >
+          Toggle Servo (Current:
+          <span id="currentServoPosition">{{ current_servo_position }}°</span>)
+        </button>
+        <div class="servo-status" id="servoStatus"></div>
       </div>
 
       <div class="stats-container">
@@ -358,18 +402,6 @@
       <div class="refresh-info">
         <i class="fas fa-wifi"></i> Connected to MQTT broker
       </div>
-
-      <!-- Servo Control Section -->
-      <div class="text-center">
-        <h2>Servo Control</h2>
-        <button
-          id="servoButton"
-          class="servo-button {% if current_servo_position == 90 %}active{% else %}inactive{% endif %}"
-          onclick="toggleServo()"
-        >
-          {% if current_servo_position == 90 %} 0° {% else %} 90° {% endif %}
-        </button>
-      </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -414,7 +446,7 @@
       });
 
       function toggleServo() {
-        const button = document.getElementById("servoButton");
+        const button = document.getElementById("toggleServo");
         button.disabled = true;
 
         fetch("/toggle_servo", {
@@ -436,14 +468,27 @@
                 button.classList.add("inactive");
                 button.textContent = "90°";
               }
+              document.getElementById("currentServoPosition").textContent =
+                data.servo_position + "°";
+              document.getElementById(
+                "servoStatus"
+              ).textContent = `Servo moved to ${data.servo_position}°`;
+              document.getElementById("servoStatus").style.color = "#28a745";
             }
             button.disabled = false;
           })
           .catch((error) => {
             console.error("Error:", error);
             button.disabled = false;
+            document.getElementById("servoStatus").textContent =
+              "Error: " + error.message;
+            document.getElementById("servoStatus").style.color = "#dc3545";
           });
       }
+
+      document
+        .getElementById("toggleServo")
+        .addEventListener("click", toggleServo);
     </script>
   </body>
 </html>

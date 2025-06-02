@@ -11,6 +11,7 @@ import pandas as pd
 import paho.mqtt.client as mqtt
 import json
 from flask_socketio import SocketIO
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -22,7 +23,7 @@ logger.info("Current working directory: %s", os.getcwd())
 logger.info("Environment variables loaded: %s", os.environ.get('MONGODB_URI') is not None)
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # Variabel global untuk menyimpan posisi servo terakhir
 last_servo_position = 0
@@ -32,6 +33,8 @@ MQTT_BROKER = "broker.hivemq.com"
 MQTT_PORT = 1883
 MQTT_TOPIC = "weather_station/data"
 MQTT_CONTROL_TOPIC = "weather_station/control"
+MQTT_KEEPALIVE = 60
+MQTT_RECONNECT_DELAY = 5
 
 # MongoDB connection
 try:
@@ -41,7 +44,7 @@ try:
     if not mongodb_uri:
         raise ValueError("MONGODB_URI not found in environment variables")
         
-    client = MongoClient(mongodb_uri)
+    client = MongoClient(mongodb_uri, serverSelectionTimeoutMS=5000)
     db = client['weather_prediction']
     collection = db['sensor_data']
     logger.info("MongoDB connected successfully")
@@ -54,6 +57,7 @@ except Exception as e:
 try:
     mqtt_client = mqtt.Client()
     mqtt_connected = False
+    last_mqtt_connect_attempt = 0
 
     @mqtt_client.on_connect
     def on_connect(client, userdata, flags, rc):
@@ -65,6 +69,12 @@ try:
         else:
             logger.error(f"Failed to connect to MQTT broker with code: {rc}")
             mqtt_connected = False
+
+    @mqtt_client.on_disconnect
+    def on_disconnect(client, userdata, rc):
+        global mqtt_connected
+        logger.warning(f"Disconnected from MQTT broker with code: {rc}")
+        mqtt_connected = False
 
     @mqtt_client.on_message
     def on_message(client, userdata, msg):
@@ -101,10 +111,22 @@ try:
         except Exception as e:
             logger.error(f"Error processing MQTT message: {str(e)}")
 
+    def ensure_mqtt_connection():
+        global mqtt_connected, last_mqtt_connect_attempt
+        current_time = time.time()
+        
+        if not mqtt_connected and (current_time - last_mqtt_connect_attempt) >= MQTT_RECONNECT_DELAY:
+            try:
+                logger.info("Attempting to reconnect to MQTT broker...")
+                mqtt_client.reconnect()
+                last_mqtt_connect_attempt = current_time
+            except Exception as e:
+                logger.error(f"Error reconnecting to MQTT broker: {str(e)}")
+
     # Start MQTT client in a separate thread
     def start_mqtt():
         try:
-            mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+            mqtt_client.connect(MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE)
             mqtt_client.loop_start()
             logger.info("MQTT client started")
         except Exception as e:
@@ -295,6 +317,9 @@ def toggle_servo():
         # Toggle posisi servo
         new_position = 0 if last_servo_position == 90 else 90
         last_servo_position = new_position
+        
+        # Ensure MQTT connection before publishing
+        ensure_mqtt_connection()
         
         # Publish to MQTT
         if mqtt_client and mqtt_connected:
