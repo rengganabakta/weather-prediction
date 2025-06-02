@@ -8,6 +8,9 @@ from pymongo import MongoClient
 from dotenv import load_dotenv
 import os
 import pandas as pd
+import paho.mqtt.client as mqtt
+import json
+from flask_socketio import SocketIO
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -19,6 +22,16 @@ logger.info("Current working directory: %s", os.getcwd())
 logger.info("Environment variables loaded: %s", os.environ.get('MONGODB_URI') is not None)
 
 app = Flask(__name__)
+socketio = SocketIO(app)
+
+# Variabel global untuk menyimpan posisi servo terakhir
+last_servo_position = 0
+
+# MQTT settings
+MQTT_BROKER = "broker.hivemq.com"
+MQTT_PORT = 1883
+MQTT_TOPIC = "weather_station/data"
+MQTT_CONTROL_TOPIC = "weather_station/control"
 
 # MongoDB connection
 try:
@@ -36,6 +49,54 @@ except Exception as e:
     logger.error(f"Error connecting to MongoDB: {str(e)}")
     client = None
     collection = None
+
+# MQTT Client setup
+mqtt_client = mqtt.Client()
+
+@mqtt_client.on_connect
+def on_connect(client, userdata, flags, rc):
+    logger.info(f"Connected to MQTT broker with result code {rc}")
+    client.subscribe(MQTT_TOPIC)
+
+@mqtt_client.on_message
+def on_message(client, userdata, msg):
+    try:
+        payload = json.loads(msg.payload.decode())
+        logger.info(f"Received MQTT message: {payload}")
+        
+        # Process sensor data
+        temp = float(payload.get('value1', 0))
+        humid = float(payload.get('value2', 0))
+        press = float(payload.get('value3', 0))
+        
+        # Make prediction
+        prediction_int, prediction_label = make_prediction(temp, humid, press)
+        servo_position = get_servo_position(prediction_int)
+        
+        # Save to database
+        entry = {
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "value1": round(temp, 2),
+            "value2": round(humid, 2),
+            "value3": round(press, 2),
+            "prediction": prediction_int,
+            "prediction_label": prediction_label,
+            "servo_position": servo_position
+        }
+        
+        if collection is not None:
+            collection.insert_one(entry)
+        
+        # Emit to websocket
+        socketio.emit('sensor_update', entry)
+        
+    except Exception as e:
+        logger.error(f"Error processing MQTT message: {str(e)}")
+
+# Start MQTT client in a separate thread
+def start_mqtt():
+    mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    mqtt_client.loop_start()
 
 # Load the trained AI model
 try:
@@ -68,6 +129,10 @@ def validate_sensor_data(temp: float, humid: float, press: float) -> bool:
         0 <= humid <= 100 and  # Humidity range in percentage
         800 <= press <= 1200   # Pressure range in hPa
     )
+
+def get_servo_position(prediction: int) -> int:
+    """Determine servo position based on weather prediction"""
+    return 90 if prediction == 1 else 0  # 90 degrees for rain, 0 degrees for sunny
 
 def make_prediction(temp: float, humid: float, press: float) -> tuple[int, str]:
     """Make prediction using the model"""
@@ -162,6 +227,10 @@ def receive_data():
         prediction_int, prediction_label = make_prediction(temp, humid, press)
         logger.info(f"Prediction result - Value: {prediction_int}, Label: {prediction_label}")
 
+        # Get servo position based on prediction
+        servo_position = get_servo_position(prediction_int)
+        logger.info(f"Setting servo position to: {servo_position} degrees")
+
         # Build entry
         entry = {
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -169,7 +238,8 @@ def receive_data():
             "value2": round(humid, 2),
             "value3": round(press, 2),
             "prediction": prediction_int,
-            "prediction_label": prediction_label
+            "prediction_label": prediction_label,
+            "servo_position": servo_position
         }
         logger.info(f"Created database entry: {entry}")
 
@@ -186,7 +256,8 @@ def receive_data():
         response_data = {
             "status": "success",
             "prediction": prediction_int,
-            "label": prediction_label
+            "label": prediction_label,
+            "servo_position": servo_position
         }
         logger.info(f"Sending response: {response_data}")
         return jsonify(response_data), 200
@@ -196,11 +267,43 @@ def receive_data():
         logger.error(f"Error type: {type(e)}")
         return jsonify({"error": "Internal server error"}), 500
 
+@app.route('/toggle_servo', methods=['POST'])
+def toggle_servo():
+    """Endpoint untuk toggle posisi servo"""
+    global last_servo_position
+    
+    try:
+        # Toggle posisi servo
+        new_position = -90 if last_servo_position == 90 else 90
+        last_servo_position = new_position
+        
+        # Publish to MQTT
+        control_message = json.dumps({"servo_position": new_position})
+        mqtt_client.publish(MQTT_CONTROL_TOPIC, control_message)
+        
+        # Simpan ke database
+        if collection is not None:
+            entry = {
+                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "servo_position": new_position,
+                "control_type": "manual"
+            }
+            collection.insert_one(entry)
+        
+        return jsonify({
+            "status": "success",
+            "servo_position": new_position
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error toggling servo: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
+
 @app.route('/')
 def index():
     """Dashboard halaman utama"""
     # Get last 100 records from MongoDB
-    if collection is not None:  # Fixed collection check
+    if collection is not None:
         data_history = list(collection.find().sort('timestamp', -1).limit(100))
         # Convert ObjectId to string for JSON serialization
         for item in data_history:
@@ -208,8 +311,12 @@ def index():
     else:
         data_history = []
     
-    return render_template('index.html', data_history=data_history)
+    return render_template('index.html', 
+                         data_history=data_history,
+                         current_servo_position=last_servo_position)
 
 if __name__ == '__main__':
-    # Jalankan di semua IP, cocok untuk ESP32 akses lokal
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Start MQTT client
+    start_mqtt()
+    # Run Flask app with SocketIO
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)

@@ -12,6 +12,7 @@
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
     />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
       :root {
         --dark-bg: #0f172a;
@@ -259,6 +260,30 @@
       .table td {
         color: #fff !important;
       }
+
+      .servo-button {
+        width: 200px;
+        height: 200px;
+        border-radius: 50%;
+        font-size: 24px;
+        font-weight: bold;
+        transition: all 0.3s ease;
+        border: none;
+        cursor: pointer;
+        margin: 20px auto;
+        display: block;
+      }
+      .servo-button.active {
+        background-color: #28a745;
+        color: white;
+      }
+      .servo-button.inactive {
+        background-color: #dc3545;
+        color: white;
+      }
+      .data-table {
+        margin-top: 30px;
+      }
     </style>
   </head>
   <body>
@@ -277,11 +302,13 @@
           <div class="stat-title">
             <i class="fas fa-database"></i> Total Entries
           </div>
-          <div class="stat-value">{{ data_history | length }}</div>
+          <div class="stat-value" id="totalEntries">
+            {{ data_history | length }}
+          </div>
         </div>
         <div class="stat-card">
           <div class="stat-title"><i class="fas fa-clock"></i> Last Update</div>
-          <div class="stat-value">
+          <div class="stat-value" id="lastUpdate">
             {{ data_history[0].timestamp if data_history else 'No Data' }}
           </div>
         </div>
@@ -289,9 +316,7 @@
           <div class="stat-title">
             <i class="fas fa-cloud-rain"></i> Latest Prediction
           </div>
-          <div
-            class="stat-value prediction-{{ data_history[0].prediction_label.lower() if data_history else 'sunny' }}"
-          >
+          <div class="stat-value" id="latestPrediction">
             {{ data_history[0].prediction_label if data_history else 'No Data'
             }}
           </div>
@@ -309,9 +334,10 @@
                 <th>Humidity (%)</th>
                 <th>Pressure (hPa)</th>
                 <th>Prediction</th>
+                <th>Servo Position</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody id="dataTableBody">
               {% for data in data_history %}
               <tr>
                 <td>{{ data.timestamp }}</td>
@@ -321,6 +347,7 @@
                 <td class="prediction-{{ data.prediction_label.lower() }}">
                   {{ data.prediction_label }}
                 </td>
+                <td>{{ data.servo_position }}°</td>
               </tr>
               {% endfor %}
             </tbody>
@@ -329,16 +356,94 @@
       </div>
 
       <div class="refresh-info">
-        <i class="fas fa-sync-alt"></i> Auto-refreshing every 30 seconds
+        <i class="fas fa-wifi"></i> Connected to MQTT broker
+      </div>
+
+      <!-- Servo Control Section -->
+      <div class="text-center">
+        <h2>Servo Control</h2>
+        <button
+          id="servoButton"
+          class="servo-button {% if current_servo_position == 90 %}active{% else %}inactive{% endif %}"
+          onclick="toggleServo()"
+        >
+          {% if current_servo_position == 90 %} -90° {% else %} 90° {% endif %}
+        </button>
       </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-      // Auto refresh page every 30 seconds
-      setTimeout(function () {
-        location.reload();
-      }, 30000);
+      // Connect to WebSocket
+      const socket = io();
+
+      // Handle real-time updates
+      socket.on("sensor_update", function (data) {
+        // Update stats
+        document.getElementById("lastUpdate").textContent = data.timestamp;
+        document.getElementById("latestPrediction").textContent =
+          data.prediction_label;
+        document.getElementById("latestPrediction").className =
+          "stat-value prediction-" + data.prediction_label.toLowerCase();
+
+        // Update table
+        const tbody = document.getElementById("dataTableBody");
+        const newRow = document.createElement("tr");
+        newRow.innerHTML = `
+          <td>${data.timestamp}</td>
+          <td>${data.value1}</td>
+          <td>${data.value2}</td>
+          <td>${data.value3}</td>
+          <td class="prediction-${data.prediction_label.toLowerCase()}">${
+          data.prediction_label
+        }</td>
+          <td>${data.servo_position}°</td>
+        `;
+
+        // Add new row at the top
+        tbody.insertBefore(newRow, tbody.firstChild);
+
+        // Remove last row if more than 100 entries
+        if (tbody.children.length > 100) {
+          tbody.removeChild(tbody.lastChild);
+        }
+
+        // Update total entries
+        document.getElementById("totalEntries").textContent =
+          tbody.children.length;
+      });
+
+      function toggleServo() {
+        const button = document.getElementById("servoButton");
+        button.disabled = true;
+
+        fetch("/toggle_servo", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.status === "success") {
+              // Update button appearance
+              if (data.servo_position === 90) {
+                button.classList.remove("inactive");
+                button.classList.add("active");
+                button.textContent = "-90°";
+              } else {
+                button.classList.remove("active");
+                button.classList.add("inactive");
+                button.textContent = "90°";
+              }
+            }
+            button.disabled = false;
+          })
+          .catch((error) => {
+            console.error("Error:", error);
+            button.disabled = false;
+          });
+      }
     </script>
   </body>
 </html>
