@@ -274,7 +274,7 @@ def toggle_servo():
     
     try:
         # Toggle posisi servo
-        new_position = -90 if last_servo_position == 90 else 90
+        new_position = 0 if last_servo_position == 90 else 90
         last_servo_position = new_position
         
         # Publish to MQTT

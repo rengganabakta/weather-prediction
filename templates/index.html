@@ -367,7 +367,7 @@
           class="servo-button {% if current_servo_position == 90 %}active{% else %}inactive{% endif %}"
           onclick="toggleServo()"
         >
-          {% if current_servo_position == 90 %} -90° {% else %} 90° {% endif %}
+          {% if current_servo_position == 90 %} 0° {% else %} 90° {% endif %}
         </button>
       </div>
     </div>
@@ -430,7 +430,7 @@
               if (data.servo_position === 90) {
                 button.classList.remove("inactive");
                 button.classList.add("active");
-                button.textContent = "-90°";
+                button.textContent = "0°";
               } else {
                 button.classList.remove("active");
                 button.classList.add("inactive");
