@@ -22,7 +22,7 @@ logger.info("Current working directory: %s", os.getcwd())
 logger.info("Environment variables loaded: %s", os.environ.get('MONGODB_URI') is not None)
 
 app = Flask(__name__)
-socketio = SocketIO(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Variabel global untuk menyimpan posisi servo terakhir
 last_servo_position = 0
@@ -51,52 +51,71 @@ except Exception as e:
     collection = None
 
 # MQTT Client setup
-mqtt_client = mqtt.Client()
+try:
+    mqtt_client = mqtt.Client()
+    mqtt_connected = False
 
-@mqtt_client.on_connect
-def on_connect(client, userdata, flags, rc):
-    logger.info(f"Connected to MQTT broker with result code {rc}")
-    client.subscribe(MQTT_TOPIC)
+    @mqtt_client.on_connect
+    def on_connect(client, userdata, flags, rc):
+        global mqtt_connected
+        if rc == 0:
+            logger.info("Connected to MQTT broker")
+            mqtt_connected = True
+            client.subscribe(MQTT_TOPIC)
+        else:
+            logger.error(f"Failed to connect to MQTT broker with code: {rc}")
+            mqtt_connected = False
 
-@mqtt_client.on_message
-def on_message(client, userdata, msg):
-    try:
-        payload = json.loads(msg.payload.decode())
-        logger.info(f"Received MQTT message: {payload}")
-        
-        # Process sensor data
-        temp = float(payload.get('value1', 0))
-        humid = float(payload.get('value2', 0))
-        press = float(payload.get('value3', 0))
-        
-        # Make prediction
-        prediction_int, prediction_label = make_prediction(temp, humid, press)
-        servo_position = get_servo_position(prediction_int)
-        
-        # Save to database
-        entry = {
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "value1": round(temp, 2),
-            "value2": round(humid, 2),
-            "value3": round(press, 2),
-            "prediction": prediction_int,
-            "prediction_label": prediction_label,
-            "servo_position": servo_position
-        }
-        
-        if collection is not None:
-            collection.insert_one(entry)
-        
-        # Emit to websocket
-        socketio.emit('sensor_update', entry)
-        
-    except Exception as e:
-        logger.error(f"Error processing MQTT message: {str(e)}")
+    @mqtt_client.on_message
+    def on_message(client, userdata, msg):
+        try:
+            payload = json.loads(msg.payload.decode())
+            logger.info(f"Received MQTT message: {payload}")
+            
+            # Process sensor data
+            temp = float(payload.get('value1', 0))
+            humid = float(payload.get('value2', 0))
+            press = float(payload.get('value3', 0))
+            
+            # Make prediction
+            prediction_int, prediction_label = make_prediction(temp, humid, press)
+            servo_position = get_servo_position(prediction_int)
+            
+            # Save to database
+            entry = {
+                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "value1": round(temp, 2),
+                "value2": round(humid, 2),
+                "value3": round(press, 2),
+                "prediction": prediction_int,
+                "prediction_label": prediction_label,
+                "servo_position": servo_position
+            }
+            
+            if collection is not None:
+                collection.insert_one(entry)
+            
+            # Emit to websocket
+            socketio.emit('sensor_update', entry)
+            
+        except Exception as e:
+            logger.error(f"Error processing MQTT message: {str(e)}")
 
-# Start MQTT client in a separate thread
-def start_mqtt():
-    mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
-    mqtt_client.loop_start()
+    # Start MQTT client in a separate thread
+    def start_mqtt():
+        try:
+            mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+            mqtt_client.loop_start()
+            logger.info("MQTT client started")
+        except Exception as e:
+            logger.error(f"Error starting MQTT client: {str(e)}")
+
+    # Start MQTT client
+    start_mqtt()
+
+except Exception as e:
+    logger.error(f"Error setting up MQTT client: {str(e)}")
+    mqtt_client = None
 
 # Load the trained AI model
 try:
@@ -278,8 +297,12 @@ def toggle_servo():
         last_servo_position = new_position
         
         # Publish to MQTT
-        control_message = json.dumps({"servo_position": new_position})
-        mqtt_client.publish(MQTT_CONTROL_TOPIC, control_message)
+        if mqtt_client and mqtt_connected:
+            control_message = json.dumps({"servo_position": new_position})
+            mqtt_client.publish(MQTT_CONTROL_TOPIC, control_message)
+            logger.info(f"Published servo control message: {control_message}")
+        else:
+            logger.warning("MQTT client not connected, cannot publish servo control message")
         
         # Simpan ke database
         if collection is not None:
@@ -316,7 +339,5 @@ def index():
                          current_servo_position=last_servo_position)
 
 if __name__ == '__main__':
-    # Start MQTT client
-    start_mqtt()
     # Run Flask app with SocketIO
     socketio.run(app, host='0.0.0.0', port=5000, debug=True)
