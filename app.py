@@ -25,14 +25,10 @@ logger.info("Environment variables loaded: %s", os.environ.get('MONGODB_URI') is
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
-# Variabel global untuk menyimpan posisi servo terakhir
-last_servo_position = 0
-
 # MQTT settings
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_PORT = 1883
 MQTT_TOPIC = "weather_station/data"
-MQTT_CONTROL_TOPIC = "weather_station/control"
 MQTT_KEEPALIVE = 60
 MQTT_RECONNECT_DELAY = 5
 
@@ -92,7 +88,6 @@ def setup_mqtt():
                 
                 # Make prediction
                 prediction_int, prediction_label = make_prediction(temp, humid, press)
-                servo_position = get_servo_position(prediction_int)
                 
                 # Save to database
                 entry = {
@@ -101,8 +96,7 @@ def setup_mqtt():
                     "value2": round(humid, 2),
                     "value3": round(press, 2),
                     "prediction": prediction_int,
-                    "prediction_label": prediction_label,
-                    "servo_position": servo_position
+                    "prediction_label": prediction_label
                 }
                 
                 if collection is not None:
@@ -154,10 +148,6 @@ def validate_sensor_data(temp: float, humid: float, press: float) -> bool:
         0 <= humid <= 100 and  # Humidity range in percentage
         800 <= press <= 1200   # Pressure range in hPa
     )
-
-def get_servo_position(prediction: int) -> int:
-    """Determine servo position based on weather prediction"""
-    return 90 if prediction == 1 else 0  # 90 degrees for rain, 0 degrees for sunny
 
 def make_prediction(temp: float, humid: float, press: float) -> tuple[int, str]:
     """Make prediction using the model"""
@@ -244,10 +234,6 @@ def receive_data():
         prediction_int, prediction_label = make_prediction(temp, humid, press)
         logger.info(f"Prediction result - Value: {prediction_int}, Label: {prediction_label}")
 
-        # Get servo position based on prediction
-        servo_position = get_servo_position(prediction_int)
-        logger.info(f"Setting servo position to: {servo_position} degrees")
-
         # Build entry
         entry = {
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -255,8 +241,7 @@ def receive_data():
             "value2": round(humid, 2),
             "value3": round(press, 2),
             "prediction": prediction_int,
-            "prediction_label": prediction_label,
-            "servo_position": servo_position
+            "prediction_label": prediction_label
         }
         logger.info(f"Created database entry: {entry}")
 
@@ -273,8 +258,7 @@ def receive_data():
         response_data = {
             "status": "success",
             "prediction": prediction_int,
-            "label": prediction_label,
-            "servo_position": servo_position
+            "label": prediction_label
         }
         logger.info(f"Sending response: {response_data}")
         return jsonify(response_data), 200
@@ -282,42 +266,6 @@ def receive_data():
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}")
         logger.error(f"Error type: {type(e)}")
-        return jsonify({"error": "Internal server error"}), 500
-
-@app.route('/toggle_servo', methods=['POST'])
-def toggle_servo():
-    """Endpoint untuk toggle posisi servo"""
-    global last_servo_position
-    
-    try:
-        # Toggle posisi servo
-        new_position = 0 if last_servo_position == 90 else 90
-        last_servo_position = new_position
-        
-        # Publish to MQTT
-        if mqtt_client and mqtt_connected:
-            control_message = json.dumps({"servo_position": new_position})
-            mqtt_client.publish(MQTT_CONTROL_TOPIC, control_message)
-            logger.info(f"Published servo control message: {control_message}")
-        else:
-            logger.warning("MQTT client not connected, cannot publish servo control message")
-        
-        # Simpan ke database
-        if collection is not None:
-            entry = {
-                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                "servo_position": new_position,
-                "control_type": "manual"
-            }
-            collection.insert_one(entry)
-        
-        return jsonify({
-            "status": "success",
-            "servo_position": new_position
-        }), 200
-        
-    except Exception as e:
-        logger.error(f"Error toggling servo: {str(e)}")
         return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/')
@@ -333,14 +281,10 @@ def index():
         else:
             data_history = []
         
-        return render_template('index.html', 
-                             data_history=data_history,
-                             current_servo_position=last_servo_position)
+        return render_template('index.html', data_history=data_history)
     except Exception as e:
         logger.error(f"Error rendering index: {str(e)}")
-        return render_template('index.html', 
-                             data_history=[],
-                             current_servo_position=0)
+        return render_template('index.html', data_history=[])
 
 if __name__ == '__main__':
     # Setup MQTT
