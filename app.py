@@ -268,6 +268,28 @@ def receive_data():
         logger.error(f"Error type: {type(e)}")
         return jsonify({"error": "Internal server error"}), 500
 
+@app.route('/data')
+def get_data():
+    """Endpoint untuk mendapatkan data historis"""
+    try:
+        logger.info("Fetching data from MongoDB...")
+        # Get last 100 records from MongoDB
+        if collection is not None:
+            data = list(collection.find().sort('timestamp', -1).limit(100))
+            logger.info(f"Found {len(data)} records")
+            # Convert ObjectId to string for JSON serialization
+            for item in data:
+                item['_id'] = str(item['_id'])
+            logger.info("Data prepared for JSON serialization")
+            return jsonify(data)
+        else:
+            logger.warning("MongoDB collection is None")
+            return jsonify([])
+    except Exception as e:
+        logger.error(f"Error getting data: {str(e)}")
+        logger.error(f"Error type: {type(e)}")
+        return jsonify([])
+
 @app.route('/')
 def index():
     """Dashboard halaman utama"""
