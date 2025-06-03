@@ -320,90 +320,58 @@
   <body>
     <div class="container">
       <div class="dashboard-header">
-        <h1 class="dashboard-title text-center">
-          <i class="fas fa-cloud-sun"></i> Weather Prediction Dashboard
-        </h1>
-        <p class="text-center text-light mb-0">
-          Real-time weather monitoring system
-        </p>
-      </div>
-
-      <!-- Servo Control Section -->
-      <div class="servo-control">
-        <h3>Servo Control</h3>
-        <div class="d-flex justify-content-center gap-3">
-          <button id="toggleServo" class="btn btn-primary servo-button">
-            Toggle Servo (Current:
-            <span id="currentServoPosition">{{ current_servo_position }}°</span
-            >)
-          </button>
-          <button id="manualControl" class="btn btn-warning servo-button">
-            Manual Control
-          </button>
-        </div>
-        <div class="servo-status" id="servoStatus"></div>
+        <h1 class="dashboard-title">Weather Prediction Dashboard</h1>
       </div>
 
       <div class="stats-container">
         <div class="stat-card">
           <div class="stat-title">
-            <i class="fas fa-database"></i> Total Entries
+            <i class="fas fa-temperature-high"></i>
+            Temperature
           </div>
-          <div class="stat-value" id="totalEntries">
-            {{ data_history | length }}
-          </div>
+          <div class="stat-value" id="current-temp">--°C</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-title"><i class="fas fa-clock"></i> Last Update</div>
-          <div class="stat-value" id="lastUpdate">
-            {{ data_history[0].timestamp if data_history else 'No Data' }}
-          </div>
-        </div>
+
         <div class="stat-card">
           <div class="stat-title">
-            <i class="fas fa-cloud-rain"></i> Latest Prediction
+            <i class="fas fa-tint"></i>
+            Humidity
           </div>
-          <div class="stat-value" id="latestPrediction">
-            {{ data_history[0].prediction_label if data_history else 'No Data'
-            }}
+          <div class="stat-value" id="current-humidity">--%</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-title">
+            <i class="fas fa-cloud"></i>
+            Prediction
           </div>
+          <div class="stat-value" id="current-prediction">--</div>
         </div>
       </div>
 
       <div class="table-container">
-        <h4><i class="fas fa-history"></i> Historical Data</h4>
+        <h4><i class="fas fa-history"></i> Recent Data</h4>
         <div class="table-responsive">
           <table class="table">
             <thead>
               <tr>
-                <th>Timestamp</th>
-                <th>Temperature (°C)</th>
-                <th>Humidity (%)</th>
-                <th>Pressure (hPa)</th>
+                <th>Time</th>
+                <th>Temperature</th>
+                <th>Humidity</th>
+                <th>Pressure</th>
                 <th>Prediction</th>
-                <th>Servo Position</th>
               </tr>
             </thead>
-            <tbody id="dataTableBody">
-              {% for data in data_history %}
-              <tr>
-                <td>{{ data.timestamp }}</td>
-                <td>{{ data.value1 }}</td>
-                <td>{{ data.value2 }}</td>
-                <td>{{ data.value3 }}</td>
-                <td class="prediction-{{ data.prediction_label.lower() }}">
-                  {{ data.prediction_label }}
-                </td>
-                <td>{{ data.servo_position }}°</td>
-              </tr>
-              {% endfor %}
+            <tbody id="data-table">
+              <!-- Data will be populated here -->
             </tbody>
           </table>
         </div>
       </div>
 
       <div class="refresh-info">
-        <i class="fas fa-wifi"></i> Connected to MQTT broker
+        <i class="fas fa-sync-alt"></i>
+        Auto-refreshing every 5 seconds
       </div>
     </div>
 
@@ -412,94 +380,69 @@
       // Connect to WebSocket
       const socket = io();
 
-      // Handle manual control button
-      document
-        .getElementById("manualControl")
-        .addEventListener("click", function () {
-          const button = this;
-          const statusDiv = document.getElementById("servoStatus");
+      // Function to update the dashboard
+      function updateDashboard(data) {
+        // Update current values
+        document.getElementById(
+          "current-temp"
+        ).textContent = `${data.value1}°C`;
+        document.getElementById(
+          "current-humidity"
+        ).textContent = `${data.value2}%`;
 
-          // Disable button and show loading state
-          button.disabled = true;
-          statusDiv.textContent = "Updating servo position...";
-
-          // Get current position
-          const currentPos = parseInt(
-            document.getElementById("currentServoPosition").textContent
-          );
-          // Toggle position
-          const newPos = currentPos === 0 ? 90 : 0;
-
-          fetch("/toggle_servo", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-          })
-            .then((response) => response.json())
-            .then((data) => {
-              if (data.status === "success") {
-                document.getElementById("currentServoPosition").textContent =
-                  data.servo_position + "°";
-                statusDiv.textContent = `Servo moved to ${data.servo_position}°`;
-                statusDiv.style.color = "#28a745";
-              } else {
-                throw new Error(
-                  data.error || "Failed to update servo position"
-                );
-              }
-            })
-            .catch((error) => {
-              statusDiv.textContent = "Error: " + error.message;
-              statusDiv.style.color = "#dc3545";
-            })
-            .finally(() => {
-              // Re-enable button after 1 second
-              setTimeout(() => {
-                button.disabled = false;
-              }, 1000);
-            });
-        });
-
-      // Handle automatic control based on prediction
-      socket.on("sensor_update", function (data) {
-        // Update stats
-        document.getElementById("lastUpdate").textContent = data.timestamp;
-        document.getElementById("latestPrediction").textContent =
-          data.prediction_label;
-        document.getElementById("latestPrediction").className =
-          "stat-value prediction-" + data.prediction_label.toLowerCase();
-
-        // Update servo position based on prediction
-        if (data.prediction === 1) {
-          document.getElementById("currentServoPosition").textContent = "90°";
+        // Update prediction with icon
+        const predictionElement = document.getElementById("current-prediction");
+        if (data.prediction_label === "Rain") {
+          predictionElement.innerHTML =
+            '<span class="prediction-rain">Rain</span>';
         } else {
-          document.getElementById("currentServoPosition").textContent = "0°";
+          predictionElement.innerHTML =
+            '<span class="prediction-sunny">Sunny</span>';
         }
 
         // Update table
-        const tbody = document.getElementById("dataTableBody");
+        const tableBody = document.getElementById("data-table");
         const newRow = document.createElement("tr");
         newRow.innerHTML = `
           <td>${data.timestamp}</td>
-          <td>${data.value1}</td>
-          <td>${data.value2}</td>
-          <td>${data.value3}</td>
-          <td class="prediction-${data.prediction_label.toLowerCase()}">${
-          data.prediction_label
-        }</td>
-          <td>${data.servo_position}°</td>
+          <td>${data.value1}°C</td>
+          <td>${data.value2}%</td>
+          <td>${data.value3} hPa</td>
+          <td>${
+            data.prediction_label === "Rain"
+              ? '<span class="prediction-rain">Rain</span>'
+              : '<span class="prediction-sunny">Sunny</span>'
+          }
+          </td>
         `;
 
-        tbody.insertBefore(newRow, tbody.firstChild);
-
-        if (tbody.children.length > 100) {
-          tbody.removeChild(tbody.lastChild);
+        // Add new row at the top
+        if (tableBody.firstChild) {
+          tableBody.insertBefore(newRow, tableBody.firstChild);
+        } else {
+          tableBody.appendChild(newRow);
         }
 
-        document.getElementById("totalEntries").textContent =
-          tbody.children.length;
+        // Keep only last 10 rows
+        while (tableBody.children.length > 10) {
+          tableBody.removeChild(tableBody.lastChild);
+        }
+      }
+
+      // Listen for sensor updates
+      socket.on("sensor_update", function (data) {
+        updateDashboard(data);
       });
+
+      // Initial data load
+      fetch("/data")
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.length > 0) {
+            updateDashboard(data[0]);
+          }
+        })
+        .catch((error) => console.error("Error:", error));
     </script>
   </body>
 </html>
