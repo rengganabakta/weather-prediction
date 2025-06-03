@@ -290,5 +290,8 @@ if __name__ == '__main__':
     # Setup MQTT
     setup_mqtt()
     
+    # Get port from environment variable or use default
+    port = int(os.getenv("PORT", 5000))
+    
     # Run Flask app with SocketIO
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=port, debug=False)
