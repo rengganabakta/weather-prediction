@@ -13,6 +13,7 @@ import json
 from flask_socketio import SocketIO
 import time
 import threading
+import gc
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -242,8 +243,14 @@ def index():
             # Convert ObjectId to string for JSON serialization
             for item in data_history:
                 item['_id'] = str(item['_id'])
+                # Ensure prediction_label exists
+                if 'prediction_label' not in item:
+                    item['prediction_label'] = "Sunny" if item.get('prediction', 0) == 0 else "Rain"
         else:
             data_history = []
+        
+        # Force garbage collection
+        gc.collect()
         
         return render_template('index.html', data_history=data_history)
     except Exception as e:
