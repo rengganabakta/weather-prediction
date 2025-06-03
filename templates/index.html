@@ -12,7 +12,6 @@
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
     />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
       :root {
         --dark-bg: #0f172a;
@@ -260,61 +259,6 @@
       .table td {
         color: #fff !important;
       }
-
-      .servo-button {
-        width: 200px;
-        height: 200px;
-        border-radius: 50%;
-        font-size: 24px;
-        font-weight: bold;
-        transition: all 0.3s ease;
-        border: none;
-        cursor: pointer;
-        margin: 20px auto;
-        display: block;
-      }
-      .servo-button.active {
-        background-color: #28a745;
-        color: white;
-      }
-      .servo-button.inactive {
-        background-color: #dc3545;
-        color: white;
-      }
-      .data-table {
-        margin-top: 30px;
-      }
-
-      .card {
-        margin-bottom: 20px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-      }
-      .card-header {
-        background-color: #f8f9fa;
-        font-weight: bold;
-      }
-      .servo-control {
-        text-align: center;
-        padding: 20px;
-        background-color: #f8f9fa;
-        border-radius: 8px;
-        margin-bottom: 20px;
-      }
-      .servo-button {
-        padding: 15px 30px;
-        font-size: 1.2em;
-        font-weight: bold;
-        border-radius: 8px;
-        transition: all 0.3s ease;
-      }
-      .servo-button:hover {
-        transform: scale(1.05);
-      }
-      .servo-status {
-        margin-top: 10px;
-        font-size: 1.1em;
-        color: #666;
-      }
     </style>
   </head>
   <body>
@@ -328,34 +272,16 @@
         </p>
       </div>
 
-      <!-- Servo Control Section -->
-      <div class="servo-control">
-        <h3>Servo Control</h3>
-        <div class="d-flex justify-content-center gap-3">
-          <button id="toggleServo" class="btn btn-primary servo-button">
-            Toggle Servo (Current:
-            <span id="currentServoPosition">{{ current_servo_position }}°</span
-            >)
-          </button>
-          <button id="manualControl" class="btn btn-warning servo-button">
-            Manual Control
-          </button>
-        </div>
-        <div class="servo-status" id="servoStatus"></div>
-      </div>
-
       <div class="stats-container">
         <div class="stat-card">
           <div class="stat-title">
             <i class="fas fa-database"></i> Total Entries
           </div>
-          <div class="stat-value" id="totalEntries">
-            {{ data_history | length }}
-          </div>
+          <div class="stat-value">{{ data_history | length }}</div>
         </div>
         <div class="stat-card">
           <div class="stat-title"><i class="fas fa-clock"></i> Last Update</div>
-          <div class="stat-value" id="lastUpdate">
+          <div class="stat-value">
             {{ data_history[0].timestamp if data_history else 'No Data' }}
           </div>
         </div>
@@ -363,7 +289,9 @@
           <div class="stat-title">
             <i class="fas fa-cloud-rain"></i> Latest Prediction
           </div>
-          <div class="stat-value" id="latestPrediction">
+          <div
+            class="stat-value prediction-{{ data_history[0].prediction_label.lower() if data_history else 'sunny' }}"
+          >
             {{ data_history[0].prediction_label if data_history else 'No Data'
             }}
           </div>
@@ -381,10 +309,9 @@
                 <th>Humidity (%)</th>
                 <th>Pressure (hPa)</th>
                 <th>Prediction</th>
-                <th>Servo Position</th>
               </tr>
             </thead>
-            <tbody id="dataTableBody">
+            <tbody>
               {% for data in data_history %}
               <tr>
                 <td>{{ data.timestamp }}</td>
@@ -394,7 +321,6 @@
                 <td class="prediction-{{ data.prediction_label.lower() }}">
                   {{ data.prediction_label }}
                 </td>
-                <td>{{ data.servo_position }}°</td>
               </tr>
               {% endfor %}
             </tbody>
@@ -403,103 +329,16 @@
       </div>
 
       <div class="refresh-info">
-        <i class="fas fa-wifi"></i> Connected to MQTT broker
+        <i class="fas fa-sync-alt"></i> Auto-refreshing every 30 seconds
       </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-      // Connect to WebSocket
-      const socket = io();
-
-      // Handle manual control button
-      document
-        .getElementById("manualControl")
-        .addEventListener("click", function () {
-          const button = this;
-          const statusDiv = document.getElementById("servoStatus");
-
-          // Disable button and show loading state
-          button.disabled = true;
-          statusDiv.textContent = "Updating servo position...";
-
-          // Get current position
-          const currentPos = parseInt(
-            document.getElementById("currentServoPosition").textContent
-          );
-          // Toggle position
-          const newPos = currentPos === 0 ? 90 : 0;
-
-          fetch("/toggle_servo", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-          })
-            .then((response) => response.json())
-            .then((data) => {
-              if (data.status === "success") {
-                document.getElementById("currentServoPosition").textContent =
-                  data.servo_position + "°";
-                statusDiv.textContent = `Servo moved to ${data.servo_position}°`;
-                statusDiv.style.color = "#28a745";
-              } else {
-                throw new Error(
-                  data.error || "Failed to update servo position"
-                );
-              }
-            })
-            .catch((error) => {
-              statusDiv.textContent = "Error: " + error.message;
-              statusDiv.style.color = "#dc3545";
-            })
-            .finally(() => {
-              // Re-enable button after 1 second
-              setTimeout(() => {
-                button.disabled = false;
-              }, 1000);
-            });
-        });
-
-      // Handle automatic control based on prediction
-      socket.on("sensor_update", function (data) {
-        // Update stats
-        document.getElementById("lastUpdate").textContent = data.timestamp;
-        document.getElementById("latestPrediction").textContent =
-          data.prediction_label;
-        document.getElementById("latestPrediction").className =
-          "stat-value prediction-" + data.prediction_label.toLowerCase();
-
-        // Update servo position based on prediction
-        if (data.prediction === 1) {
-          document.getElementById("currentServoPosition").textContent = "90°";
-        } else {
-          document.getElementById("currentServoPosition").textContent = "0°";
-        }
-
-        // Update table
-        const tbody = document.getElementById("dataTableBody");
-        const newRow = document.createElement("tr");
-        newRow.innerHTML = `
-          <td>${data.timestamp}</td>
-          <td>${data.value1}</td>
-          <td>${data.value2}</td>
-          <td>${data.value3}</td>
-          <td class="prediction-${data.prediction_label.toLowerCase()}">${
-          data.prediction_label
-        }</td>
-          <td>${data.servo_position}°</td>
-        `;
-
-        tbody.insertBefore(newRow, tbody.firstChild);
-
-        if (tbody.children.length > 100) {
-          tbody.removeChild(tbody.lastChild);
-        }
-
-        document.getElementById("totalEntries").textContent =
-          tbody.children.length;
-      });
+      // Auto refresh page every 30 seconds
+      setTimeout(function () {
+        location.reload();
+      }, 30000);
     </script>
   </body>
 </html>
